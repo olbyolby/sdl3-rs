@@ -140,9 +140,19 @@ impl TextureFormat {
     #[doc(alias = "SDL_GetGPUTextureFormatFromPixelFormat")]
     pub fn from_pixel_format(pixel_format: pixels::PixelFormat) -> Self {
         let format = sys::gpu::SDL_GetGPUTextureFormatFromPixelFormat(pixel_format.into());
+        Self::from_raw(format)
+    }
 
-        // Safety: SDL_GetGPUTextureFormatFromPixelFormat() will always return a valid SDL_GPUTextureFormat(with INVALID or the matching format)
-        unsafe { std::mem::transmute(format.0) }
+    /// Maps a raw SDL texture format to the enum, returning `Invalid` for
+    /// values this version of the bindings does not know about.
+    pub(crate) fn from_raw(raw: sys::gpu::SDL_GPUTextureFormat) -> Self {
+        if (0..=Self::Astc12x12Float as i32).contains(&raw.0) {
+            // Safety: SDL's texture formats are contiguous from INVALID (0) to
+            // ASTC_12x12_FLOAT, and every one of them has a variant here.
+            unsafe { std::mem::transmute::<u32, Self>(raw.0 as u32) }
+        } else {
+            Self::Invalid
+        }
     }
 }
 impl From<pixels::PixelFormat> for TextureFormat {
@@ -151,7 +161,6 @@ impl From<pixels::PixelFormat> for TextureFormat {
     }
 }
 
-#[doc(alias = "TTF_Version")]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ShaderFormat(pub sys::gpu::SDL_GPUShaderFormat);
 impl ShaderFormat {
@@ -461,4 +470,28 @@ pub enum SwapchainComposition {
     SdrLinear = sys::gpu::SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR.0 as u32,
     HdrExtendedLinear = sys::gpu::SDL_GPU_SWAPCHAINCOMPOSITION_HDR_EXTENDED_LINEAR.0 as u32,
     Hdr10St2084 = sys::gpu::SDL_GPU_SWAPCHAINCOMPOSITION_HDR10_ST2084.0 as u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TextureFormat;
+    use crate::pixels::PixelFormat;
+    use crate::sys;
+
+    #[test]
+    fn texture_format_from_raw_rejects_unknown_values() {
+        let unknown = sys::gpu::SDL_GPUTextureFormat(TextureFormat::Astc12x12Float as i32 + 1);
+        assert!(TextureFormat::from_raw(unknown) == TextureFormat::Invalid);
+        let negative = sys::gpu::SDL_GPUTextureFormat(-1);
+        assert!(TextureFormat::from_raw(negative) == TextureFormat::Invalid);
+        let last = sys::gpu::SDL_GPU_TEXTUREFORMAT_ASTC_12x12_FLOAT;
+        assert!(TextureFormat::from_raw(last) == TextureFormat::Astc12x12Float);
+    }
+
+    #[test]
+    fn texture_format_pixel_format_round_trip() {
+        let tf = TextureFormat::from(PixelFormat::ABGR8888);
+        assert!(tf == TextureFormat::R8g8b8a8Unorm);
+        assert!(PixelFormat::from(tf) == PixelFormat::ABGR8888);
+    }
 }
